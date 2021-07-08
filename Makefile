@@ -8,7 +8,7 @@ CXXFLAGS = -std=c11 -Wall
 LDFLAGS = 
 
 # Makefile settings - Can be customized.
-APPNAME = brace
+APPNAME = clox
 EXT = .c
 SRCDIR = src
 HEADERDIR = $(SRCDIR)/headers

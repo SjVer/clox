@@ -7,6 +7,7 @@
 #include "debug.h"
 #include "vm.h"
 
+// run the REPL
 static void repl()
 {
 	char line[1024];
@@ -24,6 +25,7 @@ static void repl()
 	}
 }
 
+// read the given file to a string
 static char *readFile(const char *path)
 {
 	FILE *file = fopen(path, "rb");
@@ -55,6 +57,7 @@ static char *readFile(const char *path)
 	return buffer;
 }
 
+// run the given file
 static void runFile(const char *path)
 {
 	char *source = readFile(path);
@@ -80,19 +83,6 @@ int main(int argc, const char *argv[])
 	}
 	else if (argc == 2)
 	{
-		// if amount of args is 2, it can be repl with debug
-		if (strcmp(argv[1], "-d") == 0 || strcmp(argv[1], "--debug") == 0)
-		{
-			setVMdebug(true);
-			repl();
-		}
-		else
-			runFile(argv[1]);
-	}
-	else if (argc == 3 &&
-			 (strcmp(argv[2], "-d") == 0 || strcmp(argv[2], "--debug")==0))
-	{
-		setVMdebug(true);
 		runFile(argv[1]);
 	}
 	else

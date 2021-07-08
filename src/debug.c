@@ -26,7 +26,7 @@ int disassembleInstruction(Chunk *chunk, int offset)
     // if line is same as previous print pipe, else print line
     if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1])
     {
-        printf("   | ");
+        printf("   |  ");
     }
     else
     {

@@ -7,22 +7,24 @@
 
 VM vm;
 
+// reset the stack
 static void resetStack()
 {
 	vm.stackTop = vm.stack;
 }
 
+// initialize the VM
 void initVM()
 {
 	resetStack();
 }
 
+// free the VM
 void freeVM()
 {
 }
 
-void setVMdebug(bool debug) { vm.debug = debug; }
-
+// run shit
 static InterpretResult run()
 {
 #define READ_BYTE() (*vm.ip++)
@@ -38,25 +40,22 @@ static InterpretResult run()
 
 	for (;;)
 	{
-		// debugging stuff
-		// #ifdef DEBUG_TRACE_EXECUTION
-		if (vm.debug)
+// debugging stuff
+#ifdef DEBUG_TRACE_EXECUTION
+		printf("\n\nSTACK:    ");
+		// printf("          ");
+		// if (vm.stack[0] == *vm.stackTop)
+			// printf("EMPTY");
+		for (Value *slot = vm.stack; slot < vm.stackTop; slot++)
 		{
-			printf("\n\nSTACK:    ");
-			// printf("          ");
-			if (vm.stack[0] == *vm.stackTop)
-				printf("EMPTY");
-			for (Value *slot = vm.stack; slot < vm.stackTop; slot++)
-			{
-				printf("[");
-				printValue(*slot);
-				printf("]");
-			}
-			printf("\nINSTRUCT: ");
-			disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
-			printf(">>> ");
+			printf("[");
+			printValue(*slot);
+			printf("]");
 		}
-		// #endif
+		printf("\nINSTRUCT: ");
+		disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
+		printf(">>> ");
+#endif
 		// swtich for execution of each intruction
 		uint8_t instruction;
 		switch (instruction = READ_BYTE())
@@ -106,18 +105,35 @@ static InterpretResult run()
 #undef BINARY_OP
 }
 
+// interpret shit and return its result
 InterpretResult interpret(const char *source)
 {
-	compile(source);
-	return INTERPRET_OK;
+	Chunk chunk;
+	initChunk(&chunk);
+
+	if (!compile(source, &chunk))
+	{
+		freeChunk(&chunk);
+		return INTERPRET_COMPILE_ERROR;
+	}
+
+	vm.chunk = &chunk;
+	vm.ip = vm.chunk->code;
+
+	InterpretResult result = run();
+
+	freeChunk(&chunk);
+	return result;
 }
 
+// push a new value onto the stack
 void push(Value value)
 {
 	*vm.stackTop = value;
 	vm.stackTop++;
 }
 
+// pop the last value off the stack
 Value pop()
 {
 	vm.stackTop--;
