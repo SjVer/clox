@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdarg.h>
 
 #include "compiler.h"
 #include "common.h"
@@ -13,6 +14,21 @@ static void resetStack()
 	vm.stackTop = vm.stack;
 }
 
+// display a runtime error
+static void runtimeError(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vfprintf(stderr, format, args);
+	va_end(args);
+	fputs("\n", stderr);
+
+	size_t instruction = vm.ip - vm.chunk->code - 1;
+	int line = vm.chunk->lines[instruction];
+	fprintf(stderr, "[line %d] in script\n", line);
+	resetStack();
+}
+
 // initialize the VM
 void initVM()
 {
@@ -24,17 +40,42 @@ void freeVM()
 {
 }
 
+// push a new value onto the stack
+void push(Value value)
+{
+	*vm.stackTop = value;
+	vm.stackTop++;
+}
+
+// pop the last value off the stack
+Value pop()
+{
+	vm.stackTop--;
+	return *vm.stackTop;
+}
+
+// return the Value at distance from top of stack without popping
+static Value peek(int distance)
+{
+	return vm.stackTop[-1 - distance];
+}
+
 // run shit
 static InterpretResult run()
 {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
-#define BINARY_OP(op)     \
-	do                    \
-	{                     \
-		double b = pop(); \
-		double a = pop(); \
-		push(a op b);     \
+#define BINARY_OP(valueType, op)                        \
+	do                                                  \
+	{                                                   \
+		if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) \
+		{                                               \
+			runtimeError("Operands must be numbers.");  \
+			return INTERPRET_RUNTIME_ERROR;             \
+		}                                               \
+		double b = AS_NUMBER(pop());                    \
+		double a = AS_NUMBER(pop());                    \
+		push(valueType(a op b));                        \
 	} while (false)
 	// wrap in block so that the macro expands safely
 
@@ -45,7 +86,7 @@ static InterpretResult run()
 		printf("\n\nSTACK:    ");
 		// printf("          ");
 		// if (vm.stack[0] == *vm.stackTop)
-			// printf("EMPTY");
+		// printf("EMPTY");
 		for (Value *slot = vm.stack; slot < vm.stackTop; slot++)
 		{
 			printf("[");
@@ -68,27 +109,32 @@ static InterpretResult run()
 		}
 		case OP_ADD:
 		{
-			BINARY_OP(+);
+			BINARY_OP(NUMBER_VAL, +);
 			break;
 		}
 		case OP_SUBTRACT:
 		{
-			BINARY_OP(-);
+			BINARY_OP(NUMBER_VAL, -);
 			break;
 		}
 		case OP_MULTIPLY:
 		{
-			BINARY_OP(*);
+			BINARY_OP(NUMBER_VAL, *);
 			break;
 		}
 		case OP_DIVIDE:
 		{
-			BINARY_OP(/);
+			BINARY_OP(NUMBER_VAL, /);
 			break;
 		}
 		case OP_NEGATE:
 		{
-			push(-pop());
+			if (!IS_NUMBER(peek(0)))
+			{
+				runtimeError("Operand must be a number.");
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			push(NUMBER_VAL(-AS_NUMBER(pop())));
 			break;
 		}
 		case OP_RETURN:
@@ -124,18 +170,4 @@ InterpretResult interpret(const char *source)
 
 	freeChunk(&chunk);
 	return result;
-}
-
-// push a new value onto the stack
-void push(Value value)
-{
-	*vm.stackTop = value;
-	vm.stackTop++;
-}
-
-// pop the last value off the stack
-Value pop()
-{
-	vm.stackTop--;
-	return *vm.stackTop;
 }

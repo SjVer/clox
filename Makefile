@@ -23,6 +23,10 @@ OBJ = $(SRC:$(SRCDIR)/%$(EXT)=$(OBJDIR)/%.o)
 DEPS = $(SRC:$(SRCDIR)/%$(EXT)=$(DEPDIR)/%.d)
 APP = $(BINDIR)/$(APPNAME)
 DEP = $(OBJ:$(OBJDIR)/%.o=%.d)
+
+DEBUGDEFS = -DDEBUG_TRACE_EXECUTION -DDEBUG_PRINT_CODE
+# DEBUG = false
+
 # UNIX-based OS variables & settings
 RM = rm
 MKDIR = mkdir
@@ -51,7 +55,7 @@ $(APP): $(OBJ) | makedirs
 # $(DEPS): $(SRCDIR)/%$(EXT) | makedirs
 	@printf "compiling $(notdir $<) into $(notdir $@)..."
 	@# $(CPP) $(CFLAGS) $< -MM -MT $(@:%.d=$(OBJDIR)/%.o) >$@
-	@$(CPP) $(CFLAGS) $< -MM -MT $(DEPS) >$@
+	$(CPP) $(CFLAGS) $< -MM -MT $(DEPS) >$@
 	@printf "\b\b done!\n"
 
 # Includes all .h files
@@ -69,9 +73,9 @@ $(OBJDIR)/%.o: $(SRCDIR)/%$(EXT) | makedirs
 .PHONY: clean
 clean:
 	@# $(RM) $(DELOBJ) $(DEP) $(APP)
-	@$(RM) -r $(OBJDIR)
-	@$(RM) -r $(DEPDIR)
-	@$(RM) -r $(BINDIR)
+	@$(RM) -rf $(OBJDIR)
+	@$(RM) -rf $(DEPDIR)
+	@$(RM) -rf $(BINDIR)
 
 # # Cleans only all files with the extension .d
 # .PHONY: cleandep
@@ -91,14 +95,10 @@ clean:
 
 .PHONY: run
 run: $(APP)
-	@printf "============ Running \"$(APP)\" ============\n\n"
-	@$(APP)
+	@printf "============ Running \"$(APP)\" with file \"$(file)\" ============\n\n"
+	@$(APP) $(file)
 
-.PHONY: run-debug
-run-debug: $(APP)
-	@printf "============ Running \"$(APP)\" in debug mode ============\n\n"
-	@$(APP) --debug
-
+.PHONY: routine
 routine: $(APP) run clean
 
 .PHONY: makedirs
@@ -107,4 +107,9 @@ makedirs:
 	@$(MKDIR) -p $(OBJDIR)
 	@$(MKDIR) -p $(DEPDIR)
 
+.PHONY: remake
 remake: clean $(APP)
+
+.PHONY: debug
+debug: CXXFLAGS += $(DEBUGDEFS)
+debug: remake

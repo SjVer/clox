@@ -270,7 +270,7 @@ static void grouping()
 static void number()
 {
 	double value = strtod(parser.previous.start, NULL);
-	emitConstant(value);
+	emitConstant(NUMBER_VAL(value));
 }
 
 // compile a unary expression
