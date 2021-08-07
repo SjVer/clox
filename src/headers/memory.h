@@ -2,6 +2,14 @@
 #define clox_memory_h
 
 #include "common.h"
+#include "object.h"
+
+// allocates memory for type of size count
+#define ALLOCATE(type, count) \
+    (type *)reallocate(NULL, 0, sizeof(type) * (count))
+
+// frees smth from a pointer
+#define FREE(type, pointer) reallocate(pointer, sizeof(type), 0)
 
 // duplicates capacity. (sets to 8 if capacity is 0)
 #define GROW_CAPACITY(capacity) \
@@ -16,5 +24,6 @@
     (type *)reallocate(pointer, sizeof(type) * (oldCount), sizeof(type) * (newCount))
 
 void *reallocate(void *pointer, size_t oldSize, size_t newSize);
+void freeObjects();
 
 #endif

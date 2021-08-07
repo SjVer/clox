@@ -4,6 +4,7 @@
 #include "common.h"
 #include "compiler.h"
 #include "scanner.h"
+#include "object.h"
 #ifdef DEBUG_PRINT_CODE
 #include "debug.h"
 #endif
@@ -61,6 +62,8 @@ static void grouping();
 static void number();
 static void unary();
 static void binary();
+static void literal();
+static void string();
 
 // -------- error stuff --------
 
@@ -189,31 +192,31 @@ ParseRule rules[] = {
 	[TOKEN_SEMICOLON] = {NULL, NULL, PREC_NONE},
 	[TOKEN_SLASH] = {NULL, binary, PREC_FACTOR},
 	[TOKEN_STAR] = {NULL, binary, PREC_FACTOR},
-	[TOKEN_BANG] = {NULL, NULL, PREC_NONE},
-	[TOKEN_BANG_EQUAL] = {NULL, NULL, PREC_NONE},
+	[TOKEN_BANG] = {unary, NULL, PREC_NONE},
+	[TOKEN_BANG_EQUAL] = {NULL, binary, PREC_EQUALITY},
 	[TOKEN_EQUAL] = {NULL, NULL, PREC_NONE},
-	[TOKEN_EQUAL_EQUAL] = {NULL, NULL, PREC_NONE},
-	[TOKEN_GREATER] = {NULL, NULL, PREC_NONE},
-	[TOKEN_GREATER_EQUAL] = {NULL, NULL, PREC_NONE},
-	[TOKEN_LESS] = {NULL, NULL, PREC_NONE},
-	[TOKEN_LESS_EQUAL] = {NULL, NULL, PREC_NONE},
+	[TOKEN_EQUAL_EQUAL] = {NULL, binary, PREC_EQUALITY},
+	[TOKEN_GREATER] = {NULL, binary, PREC_COMPARISON},
+	[TOKEN_GREATER_EQUAL] = {NULL, binary, PREC_COMPARISON},
+	[TOKEN_LESS] = {NULL, binary, PREC_COMPARISON},
+	[TOKEN_LESS_EQUAL] = {NULL, binary, PREC_COMPARISON},
 	[TOKEN_IDENTIFIER] = {NULL, NULL, PREC_NONE},
-	[TOKEN_STRING] = {NULL, NULL, PREC_NONE},
+	[TOKEN_STRING] = {string, NULL, PREC_NONE},
 	[TOKEN_NUMBER] = {number, NULL, PREC_NONE},
 	[TOKEN_AND] = {NULL, NULL, PREC_NONE},
 	[TOKEN_CLASS] = {NULL, NULL, PREC_NONE},
 	[TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
-	[TOKEN_FALSE] = {NULL, NULL, PREC_NONE},
+	[TOKEN_FALSE] = {literal, NULL, PREC_NONE},
 	[TOKEN_FOR] = {NULL, NULL, PREC_NONE},
 	[TOKEN_FUN] = {NULL, NULL, PREC_NONE},
 	[TOKEN_IF] = {NULL, NULL, PREC_NONE},
-	[TOKEN_NIL] = {NULL, NULL, PREC_NONE},
+	[TOKEN_NIL] = {literal, NULL, PREC_NONE},
 	[TOKEN_OR] = {NULL, NULL, PREC_NONE},
 	[TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
 	[TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
 	[TOKEN_SUPER] = {NULL, NULL, PREC_NONE},
 	[TOKEN_THIS] = {NULL, NULL, PREC_NONE},
-	[TOKEN_TRUE] = {NULL, NULL, PREC_NONE},
+	[TOKEN_TRUE] = {literal, NULL, PREC_NONE},
 	[TOKEN_VAR] = {NULL, NULL, PREC_NONE},
 	[TOKEN_WHILE] = {NULL, NULL, PREC_NONE},
 	[TOKEN_ERROR] = {NULL, NULL, PREC_NONE},
@@ -273,6 +276,12 @@ static void number()
 	emitConstant(NUMBER_VAL(value));
 }
 
+// compiles a string
+static void string()
+{
+	emitConstant(OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2)));
+}
+
 // compile a unary expression
 static void unary()
 {
@@ -284,6 +293,9 @@ static void unary()
 	// Emit the operator instruction.
 	switch (operatorType)
 	{
+	case TOKEN_BANG:
+		emitByte(OP_NOT);
+		break;
 	case TOKEN_MINUS:
 		emitByte(OP_NEGATE);
 		break;
@@ -301,6 +313,24 @@ static void binary()
 
 	switch (operatorType)
 	{
+	case TOKEN_BANG_EQUAL:
+		emitBytes(OP_EQUAL, OP_NOT);
+		break;
+	case TOKEN_EQUAL_EQUAL:
+		emitByte(OP_EQUAL);
+		break;
+	case TOKEN_GREATER:
+		emitByte(OP_GREATER);
+		break;
+	case TOKEN_GREATER_EQUAL:
+		emitBytes(OP_LESS, OP_NOT);
+		break;
+	case TOKEN_LESS:
+		emitByte(OP_LESS);
+		break;
+	case TOKEN_LESS_EQUAL:
+		emitBytes(OP_GREATER, OP_NOT);
+		break;
 	case TOKEN_PLUS:
 		emitByte(OP_ADD);
 		break;
@@ -312,6 +342,25 @@ static void binary()
 		break;
 	case TOKEN_SLASH:
 		emitByte(OP_DIVIDE);
+		break;
+	default:
+		return; // Unreachable.
+	}
+}
+
+// parses a literal
+static void literal()
+{
+	switch (parser.previous.type)
+	{
+	case TOKEN_FALSE:
+		emitByte(OP_FALSE);
+		break;
+	case TOKEN_NIL:
+		emitByte(OP_NIL);
+		break;
+	case TOKEN_TRUE:
+		emitByte(OP_TRUE);
 		break;
 	default:
 		return; // Unreachable.
