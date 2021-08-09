@@ -34,7 +34,7 @@ typedef enum
 	PREC_PRIMARY	 // literals n shit
 } Precedence;
 
-typedef void (*ParseFn)();
+typedef void (*ParseFn)(bool canAssign);
 
 typedef struct
 {
@@ -57,13 +57,21 @@ static Chunk *currentChunk()
 }
 
 // -------- predefinitions --------
+static void advance();
+
 static void expression();
-static void grouping();
-static void number();
-static void unary();
-static void binary();
-static void literal();
-static void string();
+static void statement();
+static void varDeclaration();
+static void expressionStatement();
+static void printStatement();
+static void declaration();
+static void grouping(bool canAssign);
+static void number(bool canAssign);
+static void unary(bool canAssign);
+static void binary(bool canAssign);
+static void literal(bool canAssign);
+static void string(bool canAssign);
+static void variable(bool canAssign);
 
 // -------- error stuff --------
 
@@ -107,6 +115,35 @@ static void errorAtCurrent(const char *message)
 	errorAt(&parser.current, message);
 }
 
+// skip tokens until something that appears to be the end
+// of a statement or smth is reached
+static void synchronize()
+{
+	parser.panicMode = false;
+
+	while (parser.current.type != TOKEN_EOF)
+	{
+		if (parser.previous.type == TOKEN_SEMICOLON)
+			return;
+		switch (parser.current.type)
+		{
+		case TOKEN_CLASS:
+		case TOKEN_FUN:
+		case TOKEN_VAR:
+		case TOKEN_FOR:
+		case TOKEN_IF:
+		case TOKEN_WHILE:
+		case TOKEN_PRINT:
+		case TOKEN_RETURN:
+			return;
+
+		default:; // Do nothing.
+		}
+
+		advance();
+	}
+}
+
 // -------- token flow stuff --------
 
 // advances to the next token
@@ -124,6 +161,12 @@ static void advance()
 	}
 }
 
+// checks if the current token is of the given type
+static bool check(TokenType type)
+{
+	return parser.current.type == type;
+}
+
 // consume the next token if it is of the correct type,
 // otherwise throw an error with the given message
 static void consume(TokenType type, const char *message)
@@ -135,6 +178,15 @@ static void consume(TokenType type, const char *message)
 	}
 
 	errorAtCurrent(message);
+}
+
+// returns true and advances if the current token is of the given type
+static bool match(TokenType type)
+{
+	if (!check(type))
+		return false;
+	advance();
+	return true;
 }
 
 // -------- emit/byte stuff --------
@@ -177,50 +229,56 @@ static void emitConstant(Value value)
 	emitBytes(OP_CONSTANT, makeConstant(value));
 }
 
+// makes an identifier with the given name
+static uint8_t identifierConstant(Token *name)
+{
+	return makeConstant(OBJ_VAL(copyString(name->start, name->length)));
+}
+
 // -------- grammar stuff --------
 
 // rules for parsing any token
 ParseRule rules[] = {
-	[TOKEN_LEFT_PAREN] = {grouping, NULL, PREC_NONE},
-	[TOKEN_RIGHT_PAREN] = {NULL, NULL, PREC_NONE},
-	[TOKEN_LEFT_BRACE] = {NULL, NULL, PREC_NONE},
-	[TOKEN_RIGHT_BRACE] = {NULL, NULL, PREC_NONE},
-	[TOKEN_COMMA] = {NULL, NULL, PREC_NONE},
-	[TOKEN_DOT] = {NULL, NULL, PREC_NONE},
-	[TOKEN_MINUS] = {unary, binary, PREC_TERM},
-	[TOKEN_PLUS] = {NULL, binary, PREC_TERM},
-	[TOKEN_SEMICOLON] = {NULL, NULL, PREC_NONE},
-	[TOKEN_SLASH] = {NULL, binary, PREC_FACTOR},
-	[TOKEN_STAR] = {NULL, binary, PREC_FACTOR},
-	[TOKEN_BANG] = {unary, NULL, PREC_NONE},
-	[TOKEN_BANG_EQUAL] = {NULL, binary, PREC_EQUALITY},
-	[TOKEN_EQUAL] = {NULL, NULL, PREC_NONE},
-	[TOKEN_EQUAL_EQUAL] = {NULL, binary, PREC_EQUALITY},
-	[TOKEN_GREATER] = {NULL, binary, PREC_COMPARISON},
-	[TOKEN_GREATER_EQUAL] = {NULL, binary, PREC_COMPARISON},
-	[TOKEN_LESS] = {NULL, binary, PREC_COMPARISON},
-	[TOKEN_LESS_EQUAL] = {NULL, binary, PREC_COMPARISON},
-	[TOKEN_IDENTIFIER] = {NULL, NULL, PREC_NONE},
-	[TOKEN_STRING] = {string, NULL, PREC_NONE},
-	[TOKEN_NUMBER] = {number, NULL, PREC_NONE},
-	[TOKEN_AND] = {NULL, NULL, PREC_NONE},
-	[TOKEN_CLASS] = {NULL, NULL, PREC_NONE},
-	[TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
-	[TOKEN_FALSE] = {literal, NULL, PREC_NONE},
-	[TOKEN_FOR] = {NULL, NULL, PREC_NONE},
-	[TOKEN_FUN] = {NULL, NULL, PREC_NONE},
-	[TOKEN_IF] = {NULL, NULL, PREC_NONE},
-	[TOKEN_NIL] = {literal, NULL, PREC_NONE},
-	[TOKEN_OR] = {NULL, NULL, PREC_NONE},
-	[TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
-	[TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
-	[TOKEN_SUPER] = {NULL, NULL, PREC_NONE},
-	[TOKEN_THIS] = {NULL, NULL, PREC_NONE},
-	[TOKEN_TRUE] = {literal, NULL, PREC_NONE},
-	[TOKEN_VAR] = {NULL, NULL, PREC_NONE},
-	[TOKEN_WHILE] = {NULL, NULL, PREC_NONE},
-	[TOKEN_ERROR] = {NULL, NULL, PREC_NONE},
-	[TOKEN_EOF] = {NULL, NULL, PREC_NONE},
+	{grouping, NULL, PREC_CALL},	 // TOKEN_LEFT_PAREN
+	{NULL, NULL, PREC_NONE},		 // TOKEN_RIGHT_PAREN
+	{NULL, NULL, PREC_NONE},		 // TOKEN_LEFT_BRACE
+	{NULL, NULL, PREC_NONE},		 // TOKEN_RIGHT_BRACE
+	{NULL, NULL, PREC_NONE},		 // TOKEN_COMMA
+	{NULL, NULL, PREC_CALL},		 // TOKEN_DOT
+	{unary, binary, PREC_TERM},		 // TOKEN_MINUS
+	{NULL, binary, PREC_TERM},		 // TOKEN_PLUS
+	{NULL, NULL, PREC_NONE},		 // TOKEN_SEMICOLON
+	{NULL, binary, PREC_FACTOR},	 // TOKEN_SLASH
+	{NULL, binary, PREC_FACTOR},	 // TOKEN_STAR
+	{unary, NULL, PREC_NONE},		 // TOKEN_BANG
+	{NULL, binary, PREC_EQUALITY},	 // TOKEN_BANG_EQUAL
+	{NULL, NULL, PREC_NONE},		 // TOKEN_EQUAL
+	{NULL, binary, PREC_EQUALITY},	 // TOKEN_EQUAL_EQUAL
+	{NULL, binary, PREC_COMPARISON}, // TOKEN_GREATER
+	{NULL, binary, PREC_COMPARISON}, // TOKEN_GREATER_EQUAL
+	{NULL, binary, PREC_COMPARISON}, // TOKEN_LESS
+	{NULL, binary, PREC_COMPARISON}, // TOKEN_LESS_EQUAL
+	{variable, NULL, PREC_NONE},	 // TOKEN_IDENTIFIER
+	{string, NULL, PREC_NONE},		 // TOKEN_STRING
+	{number, NULL, PREC_NONE},		 // TOKEN_NUMBER
+	{NULL, NULL, PREC_AND},			 // TOKEN_AND
+	{NULL, NULL, PREC_NONE},		 // TOKEN_CLASS
+	{NULL, NULL, PREC_NONE},		 // TOKEN_ELSE
+	{literal, NULL, PREC_NONE},		 // TOKEN_FALSE
+	{NULL, NULL, PREC_NONE},		 // TOKEN_FOR
+	{NULL, NULL, PREC_NONE},		 // TOKEN_FUN
+	{NULL, NULL, PREC_NONE},		 // TOKEN_IF
+	{literal, NULL, PREC_NONE},		 // TOKEN_NIL
+	{NULL, NULL, PREC_OR},			 // TOKEN_OR
+	{NULL, NULL, PREC_NONE},		 // TOKEN_PRINT
+	{NULL, NULL, PREC_NONE},		 // TOKEN_RETURN
+	{NULL, NULL, PREC_NONE},		 // TOKEN_SUPER
+	{NULL, NULL, PREC_NONE},		 // TOKEN_THIS
+	{literal, NULL, PREC_NONE},		 // TOKEN_TRUE
+	{NULL, NULL, PREC_NONE},		 // TOKEN_VAR
+	{NULL, NULL, PREC_NONE},		 // TOKEN_WHILE
+	{NULL, NULL, PREC_NONE},		 // TOKEN_ERROR
+	{NULL, NULL, PREC_NONE},		 // TOKEN_EOF
 };
 
 // returns the rule of the given token
@@ -233,25 +291,46 @@ static ParseRule *getRule(TokenType type)
 static void parsePrecedence(Precedence precedence)
 {
 	advance();
+
 	ParseFn prefixRule = getRule(parser.previous.type)->prefix;
+
 	if (prefixRule == NULL)
 	{
 		error("Expect expression.");
+
 		return;
 	}
 
-	prefixRule();
+	bool canAssign = precedence <= PREC_ASSIGNMENT;
+	prefixRule(canAssign);
 
-	/* Now we look for an infix parser for the next token. 
-	If we find one, it means the prefix expression we already compiled might be
-	an operand for it. But only if the call to parsePrecedence() has a 
-	precedence that is low enough to permit that infix operator. */
 	while (precedence <= getRule(parser.current.type)->precedence)
 	{
 		advance();
+
 		ParseFn infixRule = getRule(parser.previous.type)->infix;
-		infixRule();
+
+		infixRule(canAssign);
 	}
+
+	if (canAssign && match(TOKEN_EQUAL))
+	{
+		error("Invalid assignment target.");
+		expression();
+	}
+}
+
+// parse the current variable (identifier)
+static uint8_t parseVariable(const char *errorMessage)
+{
+	consume(TOKEN_IDENTIFIER, errorMessage);
+	return identifierConstant(&parser.previous);
+}
+
+// emits the bytes for a global variable
+static void defineVariable(uint8_t global)
+{
+	emitBytes(OP_DEFINE_GLOBAL, global);
 }
 
 // -------- expr/stmt stuff --------
@@ -262,28 +341,113 @@ static void expression()
 	parsePrecedence(PREC_ASSIGNMENT);
 }
 
+// compile a declaration
+static void declaration()
+{
+	if (match(TOKEN_VAR))
+	{
+		varDeclaration();
+	}
+	else
+	{
+		statement();
+	}
+
+	if (parser.panicMode)
+		synchronize();
+}
+
+// compile a statement
+static void statement()
+{
+	if (match(TOKEN_PRINT))
+	{
+		printStatement();
+	}
+	else
+	{
+		expressionStatement();
+	}
+	
+}
+
+// compiles a variable declaration
+static void varDeclaration()
+{
+	uint8_t global = parseVariable("Expect variable name.");
+
+	if (match(TOKEN_EQUAL))
+	{
+		expression();
+	}
+	else
+	{
+		emitByte(OP_NIL);
+	}
+	consume(TOKEN_SEMICOLON, "Expect ';' after variable declaration.");
+
+	defineVariable(global);
+}
+
+// compiles an expression statement
+static void expressionStatement()
+{
+	expression();
+	consume(TOKEN_SEMICOLON, "Expect ';' after expression.");
+	emitByte(OP_POP);
+}
+
+// compiles a print statement
+static void printStatement()
+{
+	expression();
+	consume(TOKEN_SEMICOLON, "Expect ';' after value.");
+	emitByte(OP_PRINT);
+}
+
 // compile a grouping
-static void grouping()
+static void grouping(bool canAssign)
 {
 	expression();
 	consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
 }
 
 // compiles a number
-static void number()
+static void number(bool canAssign)
 {
 	double value = strtod(parser.previous.start, NULL);
 	emitConstant(NUMBER_VAL(value));
 }
 
 // compiles a string
-static void string()
+static void string(bool canAssign)
 {
 	emitConstant(OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2)));
 }
 
+static void namedVariable(Token name, bool canAssign)
+{
+	int arg = identifierConstant(&name);
+
+	if (canAssign && match(TOKEN_EQUAL))
+	{
+		expression();
+		emitBytes(OP_SET_GLOBAL, (uint8_t)arg);
+	}
+	else
+	{
+		emitBytes(OP_GET_GLOBAL, (uint8_t)arg);
+	}
+}
+
+// compiles a variable
+static void variable(bool canAssign)
+{
+	namedVariable(parser.previous, canAssign);
+}
+
 // compile a unary expression
-static void unary()
+static void unary(bool canAssign)
 {
 	TokenType operatorType = parser.previous.type;
 
@@ -305,7 +469,7 @@ static void unary()
 }
 
 // parses a binary expression
-static void binary()
+static void binary(bool canAssign)
 {
 	TokenType operatorType = parser.previous.type;
 	ParseRule *rule = getRule(operatorType);
@@ -349,7 +513,7 @@ static void binary()
 }
 
 // parses a literal
-static void literal()
+static void literal(bool canAssign)
 {
 	switch (parser.previous.type)
 	{
@@ -390,7 +554,10 @@ bool compile(const char *source, Chunk *chunk)
 	parser.panicMode = false;
 
 	advance();
-	expression();
+	while (!match(TOKEN_EOF))
+	{
+		declaration();
+	}
 
 	consume(TOKEN_EOF, "Expect end of expression.");
 	endCompiler();

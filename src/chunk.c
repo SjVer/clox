@@ -1,3 +1,9 @@
+// disable "type name is not allowed" error
+#ifdef __INTELLISENSE__
+#pragma diag_suppress 254
+#pragma diag_suppress 29
+#endif
+
 #include <stdlib.h>
 
 #include "chunk.h"

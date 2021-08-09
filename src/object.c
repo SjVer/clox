@@ -1,6 +1,7 @@
 // disable "type name is not allowed" error
 #ifdef __INTELLISENSE__
 #pragma diag_suppress 254
+#pragma diag_suppress 29
 #endif
 
 #include <stdio.h>
@@ -33,6 +34,7 @@ static ObjString *allocateString(char *chars, int length, uint32_t hash)
 	ObjString *string = ALLOCATE_OBJ(ObjString, OBJ_STRING);
 	string->length = length;
 	string->chars = chars;
+	string->hash = hash;
 	tableSet(&vm.strings, string, NIL_VAL);
 	return string;
 }

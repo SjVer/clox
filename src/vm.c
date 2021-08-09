@@ -38,6 +38,7 @@ void initVM()
 	resetStack();
 	vm.objects = NULL;
 	initTable(&vm.strings);
+	initTable(&vm.globals);
 }
 
 // free the VM
@@ -45,6 +46,7 @@ void freeVM()
 {
 	freeObjects();
 	freeTable(&vm.strings);
+	freeTable(&vm.globals);
 }
 
 // push a new value onto the stack
@@ -102,6 +104,7 @@ static InterpretResult run()
 {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+#define READ_STRING() AS_STRING(READ_CONSTANT())
 #define BINARY_OP(valueType, op)                        \
 	do                                                  \
 	{                                                   \
@@ -120,10 +123,21 @@ static InterpretResult run()
 	{
 // debugging stuff
 #ifdef DEBUG_TRACE_EXECUTION
+
+		// for (int i = 0; i < vm.globals.count; i++)
+		// {
+		// 	printf("\nindex: %i\n", i);
+		// 	printf("key: %s\n", vm.globals.entries[i].key->chars);
+		// 	printf("value: ");
+		// 	printValue(vm.globals.entries[i].value);
+		// 	printf("\n");
+		// }
+
 		printf("\n\nSTACK:    ");
 		// printf("          ");
 		// if (vm.stack[0] == *vm.stackTop)
 		// printf("EMPTY");
+
 		for (Value *slot = vm.stack; slot < vm.stackTop; slot++)
 		{
 			printf("[");
@@ -133,6 +147,7 @@ static InterpretResult run()
 		printf("\nINSTRUCT: ");
 		disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
 		printf(">>> ");
+		// printf("%i", vm.globals.count);
 #endif
 		// swtich for execution of each intruction
 		uint8_t instruction;
@@ -157,6 +172,42 @@ static InterpretResult run()
 		case OP_FALSE:
 		{
 			push(BOOL_VAL(false));
+			break;
+		}
+		case OP_POP:
+		{
+			pop();
+			break;
+		}
+		case OP_GET_GLOBAL:
+		{
+			ObjString *name = READ_STRING();
+			Value value;
+			if (!tableGet(&vm.globals, name, &value))
+			{
+				runtimeError("Undefined variable '%s'.", name->chars);
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			push(value);
+			break;
+		}
+		case OP_DEFINE_GLOBAL:
+		{
+			ObjString *name = READ_STRING();
+			tableSet(&vm.globals, name, peek(0));
+			pop();
+			break;
+		}
+		case OP_SET_GLOBAL:
+		{
+			ObjString *name = READ_STRING();
+
+			if (tableSet(&vm.globals, name, peek(0)))
+			{
+				runtimeError("Undefined variable '%s'.", name->chars);
+				return INTERPRET_RUNTIME_ERROR;
+			}
+
 			break;
 		}
 		case OP_EQUAL:
@@ -215,8 +266,10 @@ static InterpretResult run()
 			break;
 		}
 		case OP_NOT:
+		{
 			push(BOOL_VAL(isFalsey(pop())));
 			break;
+		}
 		case OP_NEGATE:
 		{
 			if (!IS_NUMBER(peek(0)))
@@ -227,10 +280,15 @@ static InterpretResult run()
 			push(NUMBER_VAL(-AS_NUMBER(pop())));
 			break;
 		}
-		case OP_RETURN:
+		case OP_PRINT:
 		{
 			printValue(pop());
 			printf("\n");
+			break;
+		}
+		case OP_RETURN:
+		{
+			// exit the intepreter
 			return INTERPRET_OK;
 		}
 		}
@@ -238,6 +296,7 @@ static InterpretResult run()
 
 #undef READ_BYTE
 #undef READ_CONSTANT
+#undef READ_STRING
 #undef BINARY_OP
 }
 

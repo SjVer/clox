@@ -25,6 +25,14 @@ APP = $(BINDIR)/$(APPNAME)
 DEP = $(OBJ:$(OBJDIR)/%.o=%.d)
 
 DEBUGDEFS = -DDEBUG_TRACE_EXECUTION -DDEBUG_PRINT_CODE
+
+
+OBJCOUNT_NOPAD = $(shell v=`echo $(OBJ) | wc -w`; echo `seq 1 $$(expr $$v)`)
+# LAST = $(word $(words $(OBJCOUNT_NOPAD)), $(OBJCOUNT_NOPAD))
+# L_ZEROS = $(shell printf '%s' '$(LAST)' | wc -c)
+# OBJCOUNT = $(foreach v,$(OBJCOUNT_NOPAD),$(shell printf '%0$(L_ZEROS)d' $(v)))
+OBJCOUNT = $(foreach v,$(OBJCOUNT_NOPAD),$(shell printf '%02d' $(v)))
+
 # DEBUG = false
 
 # UNIX-based OS variables & settings
@@ -45,16 +53,14 @@ all: $(APP)
 
 # Builds the app
 $(APP): $(OBJ) | makedirs
-	@# printf "compiling $(notdir $<) into $(notdir $@)..."
-	@printf "compiling final product $(notdir $@)..."
+	@printf "[final] compiling final product $(notdir $@)..."
 	@$(CC) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 	@printf "\b\b done!\n"
 
 # Creates the dependecy rules
 %.d: $(SRCDIR)/%$(EXT) | makedirs
 # $(DEPS): $(SRCDIR)/%$(EXT) | makedirs
-	@printf "compiling $(notdir $<) into $(notdir $@)..."
-	@# $(CPP) $(CFLAGS) $< -MM -MT $(@:%.d=$(OBJDIR)/%.o) >$@
+	@printf "dep!!! compiling $(notdir $<) into $(notdir $@)..."
 	$(CPP) $(CFLAGS) $< -MM -MT $(DEPS) >$@
 	@printf "\b\b done!\n"
 
@@ -64,9 +70,10 @@ $(APP): $(OBJ) | makedirs
 # Building rule for .o files and its .c/.cpp in combination with all .h
 # $(OBJDIR)/%.o: $(SRCDIR)/%$(EXT) | makedirs
 $(OBJDIR)/%.o: $(SRCDIR)/%$(EXT) | makedirs
-	@printf "compiling $(notdir $<) into $(notdir $@)..."
+	@printf "[$(word 1,$(OBJCOUNT))/$(words $(OBJ))] compiling $(notdir $<) into $(notdir $@)..."
 	@$(CC) $(CXXFLAGS) -I $(HEADERDIR) -o $@ -c $<
 	@printf "\b\b done!\n"
+	$(eval OBJCOUNT = $(filter-out $(word 1,$(OBJCOUNT)),$(OBJCOUNT)))
 
 ################### Cleaning rules for Unix-based OS ###################
 # Cleans complete project
@@ -110,6 +117,11 @@ makedirs:
 .PHONY: remake
 remake: clean $(APP)
 
+.PHONY: printdebug
+printdebug:
+	@printf "debug mode set!\n"
+
 .PHONY: debug
 debug: CXXFLAGS += $(DEBUGDEFS)
+debug: printdebug
 debug: remake
