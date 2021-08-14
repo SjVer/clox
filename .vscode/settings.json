@@ -15,5 +15,6 @@
         "optional": "cpp",
         "system_error": "cpp",
         "stdio.h": "c"
-    }
+    },
+    "C_Cpp.intelliSenseEngine": "Default"
 }
