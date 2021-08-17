@@ -8,6 +8,7 @@
 
 #include "chunk.h"
 #include "memory.h"
+#include "vm.h"
 
 void initChunk(Chunk *chunk)
 {
@@ -45,6 +46,8 @@ void freeChunk(Chunk *chunk)
 
 int addConstant(Chunk *chunk, Value value)
 {
+    push(value); // push and pop to guarantee that the GC doesnt delete it
     writeValueArray(&chunk->constants, value);
+    pop();
     return chunk->constants.count - 1;
 }

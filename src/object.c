@@ -22,10 +22,34 @@ static Obj *allocateObject(size_t size, ObjType type)
 {
 	Obj *object = (Obj *)reallocate(NULL, 0, size);
 	object->type = type;
+	object->isMarked = false;
 
 	object->next = vm.objects;
 	vm.objects = object;
+
+#ifdef DEBUG_LOG_GC
+	printf(" -- %p allocate %zu for %d\n", (void *)object, size, type);
+#endif
+
 	return object;
+}
+
+// allocates and returns a new bound method
+ObjBoundMethod *newBoundMethod(Value receiver, ObjClosure *method)
+{
+	ObjBoundMethod *bound = ALLOCATE_OBJ(ObjBoundMethod, OBJ_BOUND_METHOD);
+	bound->receiver = receiver;
+	bound->method = method;
+	return bound;
+}
+
+// allocates and returns a new class
+ObjClass *newClass(ObjString *name)
+{
+	ObjClass *klass = ALLOCATE_OBJ(ObjClass, OBJ_CLASS);
+	klass->name = name;
+	initTable(&klass->methods);
+	return klass;
 }
 
 // allocates and returns a new closure
@@ -63,6 +87,14 @@ ObjFunction *newFunction()
 	return function;
 }
 
+ObjInstance *newInstance(ObjClass *klass)
+{
+	ObjInstance *instance = ALLOCATE_OBJ(ObjInstance, OBJ_INSTANCE);
+	instance->klass = klass;
+	initTable(&instance->fields);
+	return instance;
+}
+
 ObjUpvalue *newUpvalue(Value *slot)
 {
 	ObjUpvalue *upvalue = ALLOCATE_OBJ(ObjUpvalue, OBJ_UPVALUE);
@@ -79,7 +111,10 @@ static ObjString *allocateString(char *chars, int length, uint32_t hash)
 	string->length = length;
 	string->chars = chars;
 	string->hash = hash;
+
+	push(OBJ_VAL(string)); // keep string safe from GC
 	tableSet(&vm.strings, string, NIL_VAL);
+	pop();
 	return string;
 }
 
@@ -134,7 +169,7 @@ static void printFunction(ObjFunction *function)
 		printf("<script>");
 		return;
 	}
-	printf("<fn %s>", function->name->chars);
+	printf("<function %s>", function->name->chars);
 }
 
 // prints an Obj
@@ -142,20 +177,32 @@ void printObject(Value value)
 {
 	switch (OBJ_TYPE(value))
 	{
+	case OBJ_BOUND_METHOD:
+		// printFunction(AS_BOUND_METHOD(value)->method->function);
+		printf("<method %s of %s instance>",
+			AS_BOUND_METHOD(value)->method->function->name->chars,
+			AS_INSTANCE(AS_BOUND_METHOD(value)->receiver)->klass->name->chars);
+		break;
+	case OBJ_CLASS:
+		printf("<class %s>", AS_CLASS(value)->name->chars);
+		break;
 	case OBJ_CLOSURE:
 		printFunction(AS_CLOSURE(value)->function);
 		break;
 	case OBJ_FUNCTION:
 		printFunction(AS_FUNCTION(value));
 		break;
+	case OBJ_INSTANCE:
+		printf("<%s instance>", AS_INSTANCE(value)->klass->name->chars);
+		break;
 	case OBJ_NATIVE:
-		printf("<native fn>");
+		printf("<native function>");
 		break;
 	case OBJ_STRING:
 		printf("%s", AS_CSTRING(value));
 		break;
 	case OBJ_UPVALUE:
-		printf("upvalue");
+		printf("<upvalue>");
 		break;
 	}
 }

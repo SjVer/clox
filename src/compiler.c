@@ -6,6 +6,7 @@
 #include "compiler.h"
 #include "scanner.h"
 #include "object.h"
+#include "memory.h"
 #ifdef DEBUG_PRINT_CODE
 #include "debug.h"
 #endif
@@ -102,6 +103,7 @@ static void endScope();
 static void expression();
 static void statement();
 static void varDeclaration();
+static void classDeclaration();
 static void funDeclaration();
 static void expressionStatement();
 static void printStatement();
@@ -120,6 +122,9 @@ static void string(bool canAssign);
 static void variable(bool canAssign);
 static void and_(bool canAssign);
 static void or_(bool canAssign);
+static void dot(bool canAssign);
+
+static void namedVariable(Token name, bool canAssing);
 
 // -------- error stuff --------
 
@@ -420,7 +425,7 @@ ParseRule rules[] = {
 	[TOKEN_LEFT_BRACE] 		= {NULL, 	NULL,   PREC_NONE},
 	[TOKEN_RIGHT_BRACE] 	= {NULL, 	NULL,   PREC_NONE},
 	[TOKEN_COMMA] 			= {NULL, 	NULL,   PREC_NONE},
-	[TOKEN_DOT] 			= {NULL, 	NULL,   PREC_CALL},
+	[TOKEN_DOT] 			= {NULL, 	dot,   	PREC_CALL},
 	[TOKEN_MINUS] 			= {unary, 	binary, PREC_TERM},
 	[TOKEN_PLUS] 			= {NULL, 	binary, PREC_TERM},
 	[TOKEN_SEMICOLON] 		= {NULL, 	NULL,   PREC_NONE},
@@ -595,6 +600,22 @@ static void or_(bool canAssign)
 	patchJump(endJump);
 }
 
+static void dot(bool canAssign)
+{
+	consume(TOKEN_IDENTIFIER, "Expect property name after '.'.");
+	uint8_t name = identifierConstant(&parser.previous);
+
+	if (canAssign && match(TOKEN_EQUAL))
+	{
+		expression();
+		emitBytes(OP_SET_PROPERTY, name);
+	}
+	else
+	{
+		emitBytes(OP_GET_PROPERTY, name);
+	}
+}
+
 // -------- expr/stmt stuff --------
 
 // compile an expression
@@ -654,9 +675,24 @@ static void function(FunctionType type)
 	}
 }
 
+// compiles a function
+static void method()
+{
+	consume(TOKEN_IDENTIFIER, "Expect method name.");
+	uint8_t constant = identifierConstant(&parser.previous);
+
+	FunctionType type = TYPE_FUNCTION;
+	function(type);
+	emitBytes(OP_METHOD, constant);
+}
+
 // compile a declaration
 static void declaration()
 {
+	if (match(TOKEN_CLASS))
+	{
+		classDeclaration();
+	}
 	if (match(TOKEN_FUN)) {
     	funDeclaration();
   	}
@@ -722,6 +758,34 @@ static void varDeclaration()
 	consume(TOKEN_SEMICOLON, "Expect ';' after variable declaration.");
 
 	defineVariable(global);
+}
+
+// compiles a class declaration
+static void classDeclaration()
+{
+	// name
+	consume(TOKEN_IDENTIFIER, "Expect class name.");
+	Token className = parser.previous; // the class Value can be anywhere
+									   // on the stack so we need to remember
+									   // its name
+	uint8_t nameConstant = identifierConstant(&parser.previous);
+	declareVariable();
+
+	emitBytes(OP_CLASS, nameConstant);
+	defineVariable(nameConstant);
+
+	namedVariable(className, false); // load the class again so that we can use it
+
+	// methods and fields
+	consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+	
+	while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF))
+	{
+		method();
+	}
+
+	consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+	emitByte(OP_POP); // pop the class we loaded off the stack
 }
 
 // compiles a function declaration
@@ -1097,4 +1161,15 @@ ObjFunction* compile(const char *source)
 	// consume(TOKEN_EOF, "Expect end of expression.");
 	ObjFunction *function = endCompiler();
 	return parser.hadError ? NULL : function;
+}
+
+// gc stuff
+void markCompilerRoots()
+{
+	Compiler *compiler = current;
+	while (compiler != NULL)
+	{
+		markObject((Obj *)compiler->function);
+		compiler = compiler->enclosing;
+	}
 }

@@ -4,6 +4,10 @@
 #include "common.h"
 #include "object.h"
 
+void collectGarbage();
+void markValue(Value value);
+void markObject(Obj *object);
+
 // allocates memory for type of size count
 #define ALLOCATE(type, count) \
     (type *)reallocate(NULL, 0, sizeof(type) * (count))

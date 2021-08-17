@@ -25,7 +25,8 @@ APP = $(BINDIR)/$(APPNAME)
 DEP = $(OBJ:$(OBJDIR)/%.o=%.d)
 
 DEBUGDEFS = -DDEBUG_TRACE_EXECUTION -DDEBUG_PRINT_CODE
-
+DEBUG_GC_LOG_DEFS = -DDEBUG_LOG_GC
+DEBUG_GC_STRESS_DEGS = -DDEBUG_STRESS_GC
 
 OBJCOUNT_NOPAD = $(shell v=`echo $(OBJ) | wc -w`; echo `seq 1 $$(expr $$v)`)
 # LAST = $(word $(words $(OBJCOUNT_NOPAD)), $(OBJCOUNT_NOPAD))
@@ -120,8 +121,18 @@ remake: clean $(APP)
 .PHONY: printdebug
 printdebug:
 	@printf "debug mode set!\n"
+printdebug-gc:
+	@printf "gc debug mode set!\n"
 
-.PHONY: debug
+# .PHONY: debug
 debug: CXXFLAGS += $(DEBUGDEFS)
 debug: printdebug
-debug: remake
+debug: all
+
+debug-gc-log: CXXFLAGS += $(DEBUG_GC_LOG_DEFS)
+debug-gc-log: printdebug-gc
+debug-gc-log: all
+
+debug-gc-stress: CXXFLAGS  += $(DEBUG_GC_STRESS_DEFS)
+debug-gc-stress: printdebug-gc
+debug-gc-stress: all

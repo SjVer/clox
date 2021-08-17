@@ -1,4 +1,9 @@
+#ifdef __INTELLISENSE__
+#pragma diag_suppress 29
+#endif
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
@@ -17,6 +22,16 @@ VM vm;
 static Value clockNative(int argCount, Value *args)
 {
 	return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+}
+static Value clearNative(int argCount, Value *args)
+{
+	system("@cls||clear");
+	return NIL_VAL;
+}
+static Value sleepNative(int argCount, Value *args)
+{
+	sleep(AS_NUMBER(args[0]));
+	return NIL_VAL;
 }
 // ---------------------------
 
@@ -69,11 +84,18 @@ static void defineNative(const char *name, NativeFn function)
 void initVM()
 {
 	resetStack();
+	vm.bytesAllocated = 0;
+	vm.nextGC = 1024 * 1024;
 	vm.objects = NULL;
+	vm.grayCount = 0;
+	vm.grayCapacity = 0;
+	vm.grayStack = NULL;
 	initTable(&vm.strings);
 	initTable(&vm.globals);
 
 	defineNative("clock", clockNative);
+	defineNative("clear", clearNative);
+	defineNative("sleep", sleepNative);
 }
 
 // free the VM
@@ -134,6 +156,17 @@ static bool callValue(Value callee, int argCount)
 	{
 		switch (OBJ_TYPE(callee))
 		{
+		case OBJ_BOUND_METHOD:
+		{
+			ObjBoundMethod *bound = AS_BOUND_METHOD(callee);
+			return call(bound->method, argCount);
+		}
+		case OBJ_CLASS:
+		{
+			ObjClass *klass = AS_CLASS(callee);
+			vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(klass));
+			return true;
+		}
 		case OBJ_CLOSURE:
 			return call(AS_CLOSURE(callee), argCount);
 		case OBJ_NATIVE:
@@ -150,6 +183,23 @@ static bool callValue(Value callee, int argCount)
 	}
 	runtimeError("Can only call functions and classes.");
 	return false;
+}
+
+// looks up and binds the given method if it exists, otherwise 
+// false is returned
+static bool bindMethod(ObjClass *klass, ObjString *name)
+{
+	Value method;
+	if (!tableGet(&klass->methods, name, &method))
+	{
+		runtimeError("Undefined property '%s'.", name->chars);
+		return false;
+	}
+
+	ObjBoundMethod *bound = newBoundMethod(peek(0), AS_CLOSURE(method));
+	pop();
+	push(OBJ_VAL(bound));
+	return true;
 }
 
 // captures the given local as an upvalue and returns that
@@ -196,6 +246,16 @@ static void closeUpvalues(Value *last)
 	}
 }
 
+// add the method that's on top of the stack in the
+// form of a closure to the class below it
+static void defineMethod(ObjString *name)
+{
+	Value method = peek(0);
+	ObjClass *klass = AS_CLASS(peek(1));
+	tableSet(&klass->methods, name, method);
+	pop();
+}
+
 // check wether the given value returns to false
 static bool isFalsey(Value value)
 {
@@ -205,8 +265,8 @@ static bool isFalsey(Value value)
 // add two strings
 static void concatenate()
 {
-	ObjString *b = AS_STRING(pop());
-	ObjString *a = AS_STRING(pop());
+	ObjString *b = AS_STRING(peek(0));
+	ObjString *a = AS_STRING(peek(1));
 
 	int length = a->length + b->length;
 	char *chars = ALLOCATE(char, length + 1);
@@ -215,6 +275,9 @@ static void concatenate()
 	chars[length] = '\0';
 
 	ObjString *result = takeString(chars, length);
+
+	pop();
+	pop();
 	push(OBJ_VAL(result));
 }
 
@@ -357,6 +420,48 @@ static InterpretResult run()
 			*frame->closure->upvalues[slot]->location = peek(0);
 			break;
 		}
+		case OP_GET_PROPERTY:
+		{
+			if (!IS_INSTANCE(peek(0)))
+			{
+				runtimeError("Cannot get property of non-instance value.");
+				// TODO: "...value: %s.", valueToString(peek(0)); ofzo
+				return INTERPRET_RUNTIME_ERROR;
+			}
+
+			ObjInstance *instance = AS_INSTANCE(peek(0));
+			ObjString *name = READ_STRING();
+
+			Value value;
+			if (tableGet(&instance->fields, name, &value))
+			{
+				pop(); // Instance.
+				push(value);
+				break;
+			}
+
+			if (!bindMethod(instance->klass, name))
+			{
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			break;
+		}
+		case OP_SET_PROPERTY:
+		{
+			if (!IS_INSTANCE(peek(1)))
+			{
+				runtimeError("Cannot set field of non-instance value.");
+				// TODO: "...value: %s.", valueToString(peek(0)); ofzo
+				return INTERPRET_RUNTIME_ERROR;
+			}
+
+			ObjInstance *instance = AS_INSTANCE(peek(1));
+			tableSet(&instance->fields, READ_STRING(), peek(0));
+			Value value = pop();
+			pop();
+			push(value);
+			break;
+		}
 		case OP_EQUAL:
 		{
 			Value b = pop();
@@ -488,6 +593,16 @@ static InterpretResult run()
 		{
 			closeUpvalues(vm.stackTop - 1);
 			pop();
+			break;
+		}
+		case OP_CLASS:
+		{
+			push(OBJ_VAL(newClass(READ_STRING())));
+			break;
+		}
+		case OP_METHOD:
+		{
+			defineMethod(READ_STRING());
 			break;
 		}
 		case OP_RETURN:
