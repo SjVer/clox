@@ -81,6 +81,7 @@ typedef struct Compiler
 typedef struct ClassCompiler
 {
 	struct ClassCompiler *enclosing;
+	bool hasSuperclass;
 } ClassCompiler;
 
 // -------- variables --------
@@ -134,6 +135,7 @@ static void and_(bool canAssign);
 static void or_(bool canAssign);
 static void dot(bool canAssign);
 static void this_(bool canAssign);
+static void super_(bool canAssign);
 
 static void namedVariable(Token name, bool canAssing);
 
@@ -170,6 +172,7 @@ static void errorAt(Token *token, const char *message)
 // displays an error at the previous token with the given message
 static void error(const char *message)
 {
+	*(int*)0 = 0;
 	errorAt(&parser.previous, message);
 }
 
@@ -436,6 +439,15 @@ static int addUpvalue(Compiler *compiler, uint8_t index, bool isLocal)
 	return compiler->function->upvalueCount++;
 }
 
+// create a token with the given text and return it
+static Token syntheticToken(const char *text)
+{
+	Token token;
+	token.start = text;
+	token.length = (int)strlen(text);
+	return token;
+}
+
 // -------- grammar stuff --------
 
 // rules for parsing any token
@@ -473,7 +485,7 @@ ParseRule rules[] = {
 	[TOKEN_OR] 				= {NULL, 	or_, 	PREC_OR},
 	[TOKEN_PRINT] 			= {NULL, 	NULL,   PREC_NONE},
 	[TOKEN_RETURN] 			= {NULL, 	NULL,   PREC_NONE},
-	[TOKEN_SUPER] 			= {NULL, 	NULL,   PREC_NONE},
+	[TOKEN_SUPER] 			= {super_, 	NULL,   PREC_NONE},
 	[TOKEN_THIS] 			= {this_, 	NULL,   PREC_NONE},
 	[TOKEN_TRUE] 			= {literal, NULL,   PREC_NONE},
 	[TOKEN_VAR] 			= {NULL, 	NULL,   PREC_NONE},
@@ -630,6 +642,12 @@ static void dot(bool canAssign)
 		expression();
 		emitBytes(OP_SET_PROPERTY, name);
 	}
+	else if (match(TOKEN_LEFT_PAREN))
+	{
+		uint8_t argCount = argumentList();
+		emitBytes(OP_INVOKE, name);
+		emitByte(argCount);
+	}
 	else
 	{
 		emitBytes(OP_GET_PROPERTY, name);
@@ -644,6 +662,39 @@ static void this_(bool canAssign)
 		return;
 	}
 	variable(false); // 'this' will be in slot 0 of the callframe
+}
+
+static void super_(bool canAssign)
+{
+	if (currentClass == NULL)
+	{
+		error("Can't use 'super' outside of a class.");
+	}
+	else if (!currentClass->hasSuperclass)
+	{
+		error("Can't use 'super' in a class with no superclass.");
+	}
+
+	consume(TOKEN_DOT, "Expect '.' after 'super'.");
+	consume(TOKEN_IDENTIFIER, "Expect superclass method name.");
+	uint8_t name = identifierConstant(&parser.previous);
+
+	namedVariable(syntheticToken("this"), false);
+	// if a super.method is invoked user OP_SUPER_INVOKE instead
+	// for peformance reasons
+	if (match(TOKEN_LEFT_PAREN))
+	{
+		uint8_t argCount = argumentList();
+		namedVariable(syntheticToken("super"), false);
+		emitBytes(OP_SUPER_INVOKE, name);
+		emitByte(argCount);
+	}
+	else
+	{
+		namedVariable(syntheticToken("super"), false);
+		emitBytes(OP_GET_SUPER, name);
+	}
+	// emitBytes(OP_GET_SUPER, name);
 }
 
 // -------- expr/stmt stuff --------
@@ -730,7 +781,8 @@ static void declaration()
 	{
 		classDeclaration();
 	}
-	if (match(TOKEN_FUN)) {
+	else if (match(TOKEN_FUN))
+	{
     	funDeclaration();
   	}
 	else if (match(TOKEN_VAR))
@@ -813,8 +865,30 @@ static void classDeclaration()
 
 	// let the compiler know we're compiling a class
 	ClassCompiler classCompiler;
+	classCompiler.hasSuperclass = false;
 	classCompiler.enclosing = currentClass;
 	currentClass = &classCompiler;
+
+	// inheritance
+	if (match(TOKEN_LESS))
+	{
+		consume(TOKEN_IDENTIFIER, "Expect superclass name.");
+		variable(false);
+
+		if (identifiersEqual(&className, &parser.previous))
+		{
+			error("A class can't inherit from itself.");
+		}
+
+		beginScope();
+		addLocal(syntheticToken("super"));
+		defineVariable(0);
+
+		namedVariable(className, false);
+		emitByte(OP_INHERIT);
+
+		classCompiler.hasSuperclass = true;
+	}
 
 	namedVariable(className, false); // load the class again so that we can use it
 
@@ -828,6 +902,11 @@ static void classDeclaration()
 
 	consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
 	emitByte(OP_POP); // pop the class we loaded off the stack
+
+	if (classCompiler.hasSuperclass)
+	{
+		endScope();
+	}
 
 	currentClass = currentClass->enclosing;
 }
@@ -875,7 +954,7 @@ static void returnStatement()
 		{
 			error("Can't return a value from an initializer.");
 		}
-		
+
 		expression();
 		consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
 		emitByte(OP_RETURN);
@@ -1213,7 +1292,7 @@ ObjFunction* compile(const char *source)
 	advance();
 	while (!match(TOKEN_EOF))
 	{
-		declaration();
+		declaration(); // from compile()
 	}
 
 	// consume(TOKEN_EOF, "Expect end of expression.");
