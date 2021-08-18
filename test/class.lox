@@ -1,22 +1,12 @@
-class myClass {
-    myMethod() {
-        print "called method of class!";
-        // print this.field;
-    }
+class CoffeeMaker {
+  init(coffee) {
+    this.coffee = coffee;
+  }
+
+  brew() {
+    print "Enjoy your cup of " + this.coffee;
+  }
 }
 
-print "class:";
-print myClass;
-
-var myInstance = myClass();
-print "instance:";
-print myInstance;
-
-myInstance.field = "this is a field!";
-print "field:";
-print myInstance.field;
-
-print "method:";
-print myInstance.myMethod;
-print "call:";
-myInstance.myMethod();
+var maker = CoffeeMaker("coffee and chicory");
+maker.brew();

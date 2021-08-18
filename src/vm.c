@@ -93,6 +93,9 @@ void initVM()
 	initTable(&vm.strings);
 	initTable(&vm.globals);
 
+	vm.initString = NULL;
+	vm.initString = copyString("init", 4);
+
 	defineNative("clock", clockNative);
 	defineNative("clear", clearNative);
 	defineNative("sleep", sleepNative);
@@ -101,6 +104,7 @@ void initVM()
 // free the VM
 void freeVM()
 {
+	vm.initString = NULL;
 	freeObjects();
 	freeTable(&vm.strings);
 	freeTable(&vm.globals);
@@ -159,12 +163,27 @@ static bool callValue(Value callee, int argCount)
 		case OBJ_BOUND_METHOD:
 		{
 			ObjBoundMethod *bound = AS_BOUND_METHOD(callee);
+			// set the 'this' variable at slot 0 of the callframe
+			vm.stackTop[-argCount - 1] = bound->receiver;
 			return call(bound->method, argCount);
 		}
 		case OBJ_CLASS:
 		{
 			ObjClass *klass = AS_CLASS(callee);
 			vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(klass));
+
+			Value initializer;
+			if (tableGet(&klass->methods, vm.initString, &initializer))
+			{
+				return call(AS_CLOSURE(initializer), argCount);
+			}
+			else if (argCount != 0)
+			{
+				// no init() so no args
+				runtimeError("Expected 0 arguments but got %d.", argCount);
+				return false;
+			}
+
 			return true;
 		}
 		case OBJ_CLOSURE:
