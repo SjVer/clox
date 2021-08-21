@@ -1,15 +1,8 @@
-class A {
-  method() {
-    print "A";
-  }
+class Scone {
+	topping(first, second) {
+	print "scone with " + first + " and " + second;
+	}
 }
 
-class B < A {
-  method() {
-    var closure = super.method;
-    closure(); // Prints "A".
-  }
-}
-
-
-B().method();
+var scone = Scone();
+scone.topping("berries", "cream");

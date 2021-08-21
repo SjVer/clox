@@ -204,41 +204,6 @@ static bool callValue(Value callee, int argCount)
 	return false;
 }
 
-static bool invokeFromClass(ObjClass *klass, ObjString *name, int argCount)
-{
-	Value method;
-	if (!tableGet(&klass->methods, name, &method))
-	{
-		runtimeError("Undefined property '%s'.", name->chars);
-		return false;
-	}
-	return call(AS_CLOSURE(method), argCount);
-}
-
-// shortcut that combines getting a method and calling it for performance
-static bool invoke(ObjString *name, int argCount)
-{
-	Value receiver = peek(argCount);
-
-	if (!IS_INSTANCE(receiver))
-	{
-		runtimeError("Only instances have methods.");
-		return false;
-	}
-
-	ObjInstance *instance = AS_INSTANCE(receiver);
-
-	// method can be stored inside a field as well
-	Value value;
-	if (tableGet(&instance->fields, name, &value))
-	{
-		vm.stackTop[-argCount - 1] = value;
-		return callValue(value, argCount);
-	}
-
-	return invokeFromClass(instance->klass, name, argCount);
-}
-
 // looks up and binds the given method if it exists, otherwise 
 // false is returned
 static bool bindMethod(ObjClass *klass, ObjString *name)
@@ -516,17 +481,6 @@ static InterpretResult run()
 			push(value);
 			break;
 		}
-		case OP_GET_SUPER:
-		{
-			ObjString *name = READ_STRING();
-			ObjClass *superclass = AS_CLASS(pop());
-
-			if (!bindMethod(superclass, name))
-			{
-				return INTERPRET_RUNTIME_ERROR;
-			}
-			break;
-		}
 		case OP_EQUAL:
 		{
 			Value b = pop();
@@ -632,29 +586,6 @@ static InterpretResult run()
 			frame = &vm.frames[vm.frameCount - 1];
 			break;
 		}
-		case OP_INVOKE:
-		{
-			ObjString *method = READ_STRING();
-			int argCount = READ_BYTE();
-			if (!invoke(method, argCount))
-			{
-				return INTERPRET_RUNTIME_ERROR;
-			}
-			frame = &vm.frames[vm.frameCount - 1];
-			break;
-		}
-		case OP_SUPER_INVOKE:
-		{
-			ObjString *method = READ_STRING();
-			int argCount = READ_BYTE();
-			ObjClass *superclass = AS_CLASS(pop());
-			if (!invokeFromClass(superclass, method, argCount))
-			{
-				return INTERPRET_RUNTIME_ERROR;
-			}
-			frame = &vm.frames[vm.frameCount - 1];
-			break;
-		}
 		case OP_CLOSURE:
 		{
 			ObjFunction *function = AS_FUNCTION(READ_CONSTANT());
@@ -686,21 +617,6 @@ static InterpretResult run()
 		case OP_CLASS:
 		{
 			push(OBJ_VAL(newClass(READ_STRING())));
-			break;
-		}
-		case OP_INHERIT:
-		{
-			Value superclass = peek(1);
-
-			if (!IS_CLASS(superclass))
-			{
-				runtimeError("Superclass must be a class.");
-				return INTERPRET_RUNTIME_ERROR;
-			}
-
-			ObjClass *subclass = AS_CLASS(peek(0));
-			tableAddAll(&AS_CLASS(superclass)->methods, &subclass->methods);
-			pop(); // Subclass.
 			break;
 		}
 		case OP_METHOD:
